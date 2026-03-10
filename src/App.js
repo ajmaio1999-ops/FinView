@@ -323,7 +323,7 @@ function parseCSV(text, accId, settings, learnedRules = [], customRules = [], ac
   const hdrs = Object.keys(rows[0] || {}).join(',').toLowerCase();
   const isChase = top.includes('transaction date') && (top.includes('post date') || hdrs.includes('category'));
   const isAmex = top.includes('extended details') || top.includes('appears on your statement') || hdrs.includes('card member');
-  const isCB = (top.includes('id,') && top.includes('timestamp')) || hdrs.includes('transaction type') && hdrs.includes('asset');
+  const isCB = (top.includes('id,') && top.includes('timestamp')) || (hdrs.includes('transaction type') && hdrs.includes('asset'));
   const isFidelity = top.includes('symbol') && (top.includes('current value') || top.includes('cost basis'));
   const hasDebitCredit = hdrs.includes('debit') || hdrs.includes('credit');
   const isCreditCard = accType === 'credit' || isChase || isAmex;
@@ -895,10 +895,10 @@ function InsightsView({ txns, period }) {
 
 // ── CASH FLOW FORECAST ──────────────────────────────────────────────────────
 function CashFlowView({ txns, recurring, settings }) {
-  const now = new Date(); const [sb, setSb] = useState('');
+  const [sb, setSb] = useState('');
   const balance = parseFloat(sb) || (settings?.netWorthHistory?.length > 0 ? settings.netWorthHistory[settings.netWorthHistory.length - 1]?.value : 0) || 0;
   const moData = useMemo(() => { const map = {}; txns.forEach(t => { const mk = mkey(t.date); if (!mk) return; if (!map[mk]) map[mk] = { income: 0, expenses: 0 }; if (t.amt > 0 && !['Investing', 'Transfer'].includes(t.cat)) map[mk].income += t.amt; if (t.amt < 0 && !['Investing', 'Transfer'].includes(t.cat)) map[mk].expenses += Math.abs(t.amt); }); const vals = Object.values(map); if (!vals.length) return { avgIncome: 0, avgExpenses: 0 }; return { avgIncome: vals.reduce((s, v) => s + v.income, 0) / vals.length, avgExpenses: vals.reduce((s, v) => s + v.expenses, 0) / vals.length }; }, [txns]);
-  const upcoming = useMemo(() => { const co = new Date(now); co.setDate(co.getDate() + 30); return recurring.filter(r => r.active).map(r => { const next = new Date(r.nextDate); if (next >= now && next <= co) return { ...r, daysUntil: Math.round((next - now) / 864e5) }; return null; }).filter(Boolean).sort((a, b) => a.daysUntil - b.daysUntil); }, [recurring, now]);
+  const upcoming = useMemo(() => { const n = new Date(); const co = new Date(n); co.setDate(co.getDate() + 30); return recurring.filter(r => r.active).map(r => { const next = new Date(r.nextDate); if (next >= n && next <= co) return { ...r, daysUntil: Math.round((next - n) / 864e5) }; return null; }).filter(Boolean).sort((a, b) => a.daysUntil - b.daysUntil); }, [recurring]);
   const tU = upcoming.reduce((s, r) => s + r.amount, 0);
   const forecast = useMemo(() => { const pts = []; let bal = balance; for (let i = 0; i < 6; i++) { const d = new Date(now.getFullYear(), now.getMonth() + i, 1); if (i > 0) bal += moData.avgIncome - moData.avgExpenses; pts.push({ label: `${MTHS[d.getMonth()]} '${String(d.getFullYear()).slice(2)}`, balance: Math.round(bal), income: Math.round(moData.avgIncome), expenses: Math.round(moData.avgExpenses) }); } return pts; }, [balance, moData, now]);
   const velocity = useMemo(() => { const thisMo = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`; const mt = txns.filter(t => mkey(t.date) === thisMo && t.amt < 0 && !['Transfer', 'Investing'].includes(t.cat)); const dIn = now.getDate(); const total = mt.reduce((s, t) => s + Math.abs(t.amt), 0); const dL = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate() - dIn; return { spent: total, perDay: total / (dIn || 1), daysLeft: dL, projected: (total / (dIn || 1)) * (dIn + dL) }; }, [txns, now]);
@@ -1022,7 +1022,6 @@ function SettingsView({ settings, onSave, onReset }) {
 //  FEATURE 1: FINANCIAL HEALTH SCORE
 // ═══════════════════════════════════════════════════════════════════════════
 function calcHealthScore(txns, settings, recurring, balances) {
-  const now = new Date();
   const months = {};
   txns.forEach(t => {
     const mk = mkey(t.date); if (!mk) return;
@@ -1334,25 +1333,15 @@ function SubsAuditView({ txns, recurring }) {
     return changes.sort((a, b) => b.annIncrease - a.annIncrease);
   }, [activeSubs, txns]);
 
-  // Dormant detection: subscription category but no related activity nearby
+  // Dormant detection: expensive subs with low usage signals
   const dormantSubs = useMemo(() => {
     const now = new Date();
-    const threeMonths = 90 * 864e5;
     return activeSubs.filter(sub => {
       if (sub.cat !== 'Subscriptions' && sub.cat !== 'Entertainment') return false;
-      // Check if there are any non-subscription transactions from this vendor pattern
-      const v = sub.vendor;
-      const relatedSpend = txns.filter(t => {
-        if (normVendor(t.desc) === v) return false; // same vendor
-        const d = (t.desc || '').toLowerCase();
-        // Check for related spending (gym → fitness/health spending, streaming → no related)
-        return false; // Simplified: flag subscriptions with high cost and low usage signals
-      });
-      // Flag expensive subscriptions (> $20/mo) with very few charges
       const moAmt = sub.freq === 'monthly' ? sub.amount : sub.annual / 12;
       return moAmt >= 15 && sub.count <= 6 && (now - new Date(sub.lastDate)) > 25 * 864e5;
     });
-  }, [activeSubs, txns]);
+  }, [activeSubs]);
 
   // Category breakdown
   const catBreakdown = useMemo(() => {
@@ -1830,7 +1819,6 @@ export default function App() {
   if (!ready) return <div style={{ minHeight: '100vh', background: T.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><link href={FU} rel="stylesheet" /><div style={{ color: T.ac, fontSize: 16, fontFamily: T.f }}>Loading…</div></div>;
   if (!settings) return <Onboard onDone={handleOnboard} />;
 
-  const aR = recur.filter(r => r.active && !dismissed.includes(r.vendor));
   const navItem = NAV.find(n => n.id === view);
 
   // Sub-tab selector component
