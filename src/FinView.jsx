@@ -1629,7 +1629,6 @@ export default function App() {
   const [fidelityData, setFidelityData] = useState(null);
   const [coinbaseData, setCoinbaseData] = useState(null);
   const [balances, setBalances] = useState({});
-  const [subTab, setSubTab] = useState('budget');
   const now = new Date();
   const [period, setPeriod] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
 
@@ -1832,6 +1831,7 @@ export default function App() {
 
   const aR = recur.filter(r => r.active && !dismissed.includes(r.vendor));
   const navItem = NAV.find(n => n.id === view);
+  const [subTab, setSubTab] = useState('budget');
 
   // Sub-tab selector component
   const TabBar = ({ tabs, active, onChange }) => <div style={{ display: 'flex', gap: 4, marginBottom: 16, padding: 3, background: '#f1efe9', borderRadius: 12, width: 'fit-content' }}>
